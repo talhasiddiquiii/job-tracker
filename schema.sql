@@ -24,8 +24,13 @@ create table if not exists public.applications (
   contact       text check (char_length(contact) <= 300),
   job_link      text check (char_length(job_link) <= 2000 and job_link ~* '^https?://'),
   notes         text check (char_length(notes) <= 5000),
+  archived      boolean not null default false,  -- hidden from the main list, but kept
   created_at    timestamptz not null default now()
 );
+
+-- Added later: the archive feature. Adds the column to a table made before it existed.
+alter table public.applications
+  add column if not exists archived boolean not null default false;
 
 -- Speeds up "give me my rows, newest first".
 create index if not exists applications_user_created_idx

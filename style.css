@@ -20,7 +20,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 body {
   margin: 0;
   background: var(--bg);
@@ -190,6 +190,97 @@ input[aria-invalid="true"] { border-color: var(--danger); }
 .card-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; color: var(--muted); }
 .card-meta .due { color: var(--warn); font-weight: 600; }
 
+/* ===== Swipeable cards ===== */
+.swipe-row {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;            /* hides the buttons until the card slides away */
+}
+.swipe-row .card {
+  position: relative; z-index: 1;
+  touch-action: pan-y;         /* browser handles up/down scrolling; we handle sideways */
+  transition: transform .22s ease;
+  user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.swipe-row .card:active { transform: none; }
+.card-archived { background: #FBFAF7; }
+.card-archived .card-company { color: var(--muted); }
+
+.swipe-actions {
+  position: absolute; top: 0; bottom: 0;
+  display: flex;
+  visibility: hidden;          /* only the side being revealed is drawn */
+}
+.swipe-actions-left  { left: 0; }
+.swipe-actions-right { right: 0; }
+.show-left  .swipe-actions-left,
+.show-right .swipe-actions-right { visibility: visible; }
+
+.swipe-btn {
+  width: 88px;
+  border: 0;
+  font: inherit; font-weight: 600; font-size: .92rem;
+  color: #fff;
+  cursor: pointer;
+}
+.act-edit    { background: var(--accent); }
+.act-status  { background: #23558A; }
+.act-archive { background: #8A6A2F; }
+.act-delete  { background: var(--danger); }
+
+/* ===== Quick status sheet (slides up from the bottom on phones) ===== */
+dialog.sheet {
+  height: auto; max-height: 85vh;
+  margin: auto 0 0;
+  border-radius: 18px 18px 0 0;
+  background: var(--surface);
+}
+.sheet-body { padding: 20px 16px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+.sheet-sub { margin: 4px 0 16px; overflow-wrap: anywhere; }
+.status-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.status-option {
+  font: inherit; font-size: 1rem;
+  min-height: 52px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.status-option[aria-pressed="true"] { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
+
+/* ===== Toast ===== */
+.toast {
+  position: fixed; z-index: 20;
+  left: 16px; right: 16px;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 68px);   /* sits above the Add button */
+  max-width: 480px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 6px 6px 16px;
+  min-height: 52px;
+  background: var(--text); color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(31, 42, 55, .25);
+}
+.toast-action {
+  font: inherit; font-weight: 600;
+  min-height: 44px; padding: 0 14px;
+  background: transparent; color: #9FD8C6;
+  border: 0; border-radius: 8px; cursor: pointer;
+}
+
+/* ===== First-time tip ===== */
+.tip {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 12px; padding: 8px 6px 8px 14px;
+  background: var(--accent-soft); color: var(--accent-dark);
+  border-radius: 12px; font-size: .9rem;
+}
+.tip span { flex: 1; }
+.tip-close {
+  flex: none; width: 44px; height: 44px;
+  font: inherit; font-size: 1.4rem; line-height: 1;
+  background: transparent; color: inherit; border: 0; border-radius: 8px; cursor: pointer;
+}
+
 /* ===== Status pills ===== */
 .pill {
   flex: none;
@@ -274,6 +365,7 @@ dialog form { display: flex; flex-direction: column; height: 100%; }
   }
   dialog form { max-height: 90vh; }
   .dialog-foot .btn-primary { flex: 0 0 auto; }
+  dialog.sheet { margin: auto; border-radius: var(--radius); max-width: 420px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
