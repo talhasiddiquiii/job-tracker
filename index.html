@@ -63,6 +63,11 @@
 
       <nav class="filters" aria-label="Filter by status" id="filters"></nav>
 
+      <p id="tip" class="tip" hidden>
+        <span>Tip: swipe a card right to edit or change status, or left to archive or delete.</span>
+        <button type="button" id="tip-close" class="tip-close" aria-label="Dismiss tip">×</button>
+      </p>
+
       <p id="list-msg" class="list-msg" role="status" aria-live="polite"></p>
       <ul id="list" class="cards"></ul>
     </main>
@@ -136,10 +141,27 @@
 
       <footer class="dialog-foot">
         <button type="button" class="btn btn-danger" id="delete-btn" hidden>Delete</button>
+        <button type="button" class="btn btn-ghost" id="archive-btn" hidden>Archive</button>
         <button type="submit" class="btn btn-primary" id="save-btn">Save</button>
       </footer>
     </form>
   </dialog>
+
+  <!-- ===== Quick status change (from swiping a card right) ===== -->
+  <dialog id="status-dialog" class="sheet" aria-labelledby="status-title">
+    <div class="sheet-body">
+      <h2 id="status-title">Change status</h2>
+      <p id="status-sub" class="muted sheet-sub"></p>
+      <div id="status-list" class="status-list"></div>
+      <button type="button" class="btn btn-ghost btn-block" id="status-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Short messages such as "Archived · Undo" -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button type="button" id="toast-action" class="toast-action" hidden></button>
+  </div>
 
   <!-- Supabase JS library, pinned to an exact version. The "integrity" hash
        means the browser refuses to run it if the CDN ever serves a different file. -->

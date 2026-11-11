@@ -58,6 +58,16 @@ const els = {
   formMsg: $('form-msg'),
   cancelBtn: $('cancel-btn'),
   deleteBtn: $('delete-btn'),
+  archiveBtn: $('archive-btn'),
+  statusDialog: $('status-dialog'),
+  statusSub: $('status-sub'),
+  statusList: $('status-list'),
+  statusCancel: $('status-cancel'),
+  toast: $('toast'),
+  toastText: $('toast-text'),
+  toastAction: $('toast-action'),
+  tip: $('tip'),
+  tipClose: $('tip-close'),
   saveBtn: $('save-btn'),
   statusPicker: $('status-picker'),
   company: $('f-company'),
@@ -112,7 +122,8 @@ function safeUrl(value) {
   }
 }
 function isFollowUpDue(app, today = todayISO()) {
-  return Boolean(app.follow_up_on) && app.follow_up_on <= today && FOLLOW_UP_STATUSES.includes(app.status);
+  return !app.archived && Boolean(app.follow_up_on) && app.follow_up_on <= today &&
+    FOLLOW_UP_STATUSES.includes(app.status);
 }
 function pillClass(status) {
   return 'pill pill-' + status.toLowerCase();
@@ -223,11 +234,12 @@ function renderSummary() {
 }
 
 function renderFilters() {
-  const counts = {};
-  for (const a of applications) counts[a.status] = (counts[a.status] || 0) + 1;
+  const active = applications.filter((a) => !a.archived);
+  const counts = { All: active.length, Archived: applications.length - active.length };
+  for (const a of active) counts[a.status] = (counts[a.status] || 0) + 1;
 
-  const chips = ['All', ...STATUSES].map((name) => {
-    const count = name === 'All' ? applications.length : counts[name] || 0;
+  const chips = ['All', ...STATUSES, 'Archived'].map((name) => {
+    const count = counts[name] || 0;
     const chip = el('button', 'chip', `${name} (${count})`);
     chip.type = 'button';
     chip.setAttribute('aria-pressed', String(filter === name));
@@ -239,24 +251,34 @@ function renderFilters() {
 
 function renderList() {
   const today = todayISO();
-  let shown = applications;
-  if (filter === 'FollowUps') shown = applications.filter((a) => isFollowUpDue(a, today));
-  else if (filter !== 'All') shown = applications.filter((a) => a.status === filter);
+  // Archived applications only appear under the "Archived" filter.
+  const active = applications.filter((a) => !a.archived);
+  let shown;
+  if (filter === 'FollowUps') shown = active.filter((a) => isFollowUpDue(a, today));
+  else if (filter === 'Archived') shown = applications.filter((a) => a.archived);
+  else if (filter === 'All') shown = active;
+  else shown = active.filter((a) => a.status === filter);
 
   if (applications.length === 0) {
     els.listMsg.textContent = 'No applications yet. Tap “Add” to record your first one.';
   } else if (shown.length === 0) {
-    els.listMsg.textContent = filter === 'FollowUps' ? 'No follow-ups due. Nice work.' : `No applications with status “${filter}”.`;
+    els.listMsg.textContent =
+      filter === 'FollowUps' ? 'No follow-ups due. Nice work.'
+      : filter === 'Archived' ? 'Nothing archived. Swipe a card left to archive it.'
+      : filter === 'All' ? 'Everything is archived. Tap “Archived” to see them.'
+      : `No applications with status “${filter}”.`;
   } else {
     els.listMsg.textContent = filter === 'FollowUps' ? 'Showing follow-ups due today or overdue.' : '';
   }
 
+  openRow = null;
   els.list.replaceChildren(...shown.map((a) => renderCard(a, today)));
+  showTipIfNeeded(shown.length > 0);
 }
 
 function renderCard(app, today) {
-  const li = el('li');
-  const card = el('button', 'card');
+  const li = el('li', 'swipe-row');
+  const card = el('button', 'card' + (app.archived ? ' card-archived' : ''));
   card.type = 'button';
   card.setAttribute('aria-label', `Edit ${app.role} at ${app.company}, status ${app.status}`);
 
@@ -274,12 +296,221 @@ function renderCard(app, today) {
     meta.append(el('span', due ? 'due' : null, label));
   }
 
+  if (app.archived) meta.append(el('span', null, 'Archived'));
+
   card.append(top, el('span', 'card-role', app.role));
   if (meta.childElementCount) card.append(meta);
-  card.addEventListener('click', () => openForm(app));
-  li.append(card);
+
+  // The buttons hidden underneath the card, revealed by swiping.
+  // Swipe right shows the left-hand set; swipe left shows the right-hand set.
+  const leftActions = el('div', 'swipe-actions swipe-actions-left');
+  leftActions.append(
+    actionButton('Edit', 'act-edit', () => { closeRow(li); openForm(app); }),
+    actionButton('Status', 'act-status', () => { closeRow(li); openStatusPicker(app); }),
+  );
+  const rightActions = el('div', 'swipe-actions swipe-actions-right');
+  rightActions.append(
+    actionButton(app.archived ? 'Unarchive' : 'Archive', 'act-archive', () => { closeRow(li); toggleArchive(app); }),
+    actionButton('Delete', 'act-delete', () => { closeRow(li); deleteApplication(app); }),
+  );
+  leftActions.inert = true;
+  rightActions.inert = true;
+
+  li.append(leftActions, rightActions, card);
+  enableSwipe(li, card, leftActions, rightActions, () => openForm(app));
   return li;
 }
+
+function actionButton(label, className, onClick) {
+  const btn = el('button', 'swipe-btn ' + className, label);
+  btn.type = 'button';
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+// ---------- Swiping ----------
+// How it works: we follow the finger sideways and slide the card with it
+// (a CSS "transform"). When you let go, it snaps open if you dragged more than
+// halfway across the buttons, otherwise it springs back. Up/down movement is
+// left alone so the page still scrolls normally.
+
+const ACTION_WIDTH = 176;  // two 88px buttons
+const DRAG_START = 10;     // pixels of movement before we decide it's a swipe
+let openRow = null;        // only one card is open at a time
+
+function setOffset(row, x, animate = true) {
+  const { card, left, right } = row._swipe;
+  card.style.transition = animate ? '' : 'none';
+  card.style.transform = x ? `translateX(${x}px)` : '';
+  row._swipe.offset = x;
+  row.classList.toggle('show-left', x > 0);
+  row.classList.toggle('show-right', x < 0);
+  // Hidden buttons can't be reached by keyboard or screen reader until revealed.
+  left.inert = !(x >= ACTION_WIDTH);
+  right.inert = !(x <= -ACTION_WIDTH);
+  if (x !== 0) openRow = row;
+  else if (openRow === row) openRow = null;
+}
+
+function closeRow(row) {
+  if (row) setOffset(row, 0);
+}
+
+function enableSwipe(row, card, left, right, onTap) {
+  row._swipe = { card, left, right, offset: 0 };
+  let startX = 0, startY = 0, startOffset = 0, x = 0;
+  let tracking = false, dragging = false, justDragged = false;
+
+  card.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (openRow && openRow !== row) closeRow(openRow);
+    tracking = true;
+    dragging = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    startOffset = row._swipe.offset;
+  });
+
+  card.addEventListener('pointermove', (e) => {
+    if (!tracking) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!dragging) {
+      if (Math.abs(dy) > DRAG_START && Math.abs(dy) > Math.abs(dx)) { tracking = false; return; } // scrolling
+      if (Math.abs(dx) < DRAG_START) return;
+      dragging = true;
+      card.setPointerCapture(e.pointerId);
+    }
+    // Let it stretch a little past the buttons, then stop.
+    const max = ACTION_WIDTH * 1.25;
+    x = Math.max(-max, Math.min(max, startOffset + dx));
+    setOffset(row, x, false);
+  });
+
+  const finish = () => {
+    if (!tracking) return;
+    tracking = false;
+    if (!dragging) return;
+    dragging = false;
+    justDragged = true; // the "click" that follows a drag isn't a tap
+    setTimeout(() => { justDragged = false; }, 50);
+    const snap = x > ACTION_WIDTH / 2 ? ACTION_WIDTH : x < -ACTION_WIDTH / 2 ? -ACTION_WIDTH : 0;
+    setOffset(row, snap);
+    if (snap) dismissTip();
+  };
+  card.addEventListener('pointerup', finish);
+  card.addEventListener('pointercancel', finish);
+
+  card.addEventListener('click', () => {
+    if (justDragged) return;
+    if (row._swipe.offset !== 0) { closeRow(row); return; } // tapping an open card closes it
+    onTap();
+  });
+}
+
+// Tapping anywhere else closes an open card.
+document.addEventListener('pointerdown', (e) => {
+  if (openRow && !openRow.contains(e.target)) closeRow(openRow);
+});
+
+// ---------- Actions shared by swiping and the form ----------
+
+/** Save some changes to one application and redraw. Returns true if it worked. */
+async function updateApplication(id, changes) {
+  const { data, error } = await db.from('applications').update(changes).eq('id', id).select().single();
+  if (error) { showToast('Could not save: ' + error.message); return false; }
+  applications = applications.map((a) => (a.id === data.id ? data : a));
+  render();
+  return true;
+}
+
+async function toggleArchive(app) {
+  const archived = !app.archived;
+  const ok = await updateApplication(app.id, { archived });
+  if (!ok) return;
+  showToast(archived ? `Archived ${app.company}` : `Restored ${app.company}`, 'Undo', () => {
+    updateApplication(app.id, { archived: !archived });
+  });
+}
+
+async function deleteApplication(app) {
+  const ok = window.confirm(`Delete “${app.role}” at ${app.company}? This can’t be undone.`);
+  if (!ok) return false;
+  const { error } = await db.from('applications').delete().eq('id', app.id);
+  if (error) { showToast('Could not delete: ' + error.message); return false; }
+  applications = applications.filter((a) => a.id !== app.id);
+  render();
+  showToast(`Deleted ${app.company}`);
+  return true;
+}
+
+// ---------- Quick status picker ----------
+
+let statusTarget = null;
+
+function openStatusPicker(app) {
+  statusTarget = app;
+  els.statusSub.textContent = `${app.role} at ${app.company}`;
+  els.statusList.replaceChildren(...STATUSES.map((status) => {
+    const btn = el('button', 'status-option ' + pillClass(status), status);
+    btn.type = 'button';
+    btn.setAttribute('aria-pressed', String(status === app.status));
+    btn.addEventListener('click', () => chooseStatus(status));
+    return btn;
+  }));
+  els.statusDialog.showModal();
+}
+
+async function chooseStatus(status) {
+  const app = statusTarget;
+  els.statusDialog.close();
+  if (!app || status === app.status) return;
+  const changes = { status };
+  // Moving out of "Saved" means you've just applied: fill in today's date and
+  // the 7-day follow-up, the same as the form does, if they're empty.
+  if (app.status === 'Saved' && status !== 'Saved' && !app.date_applied) {
+    changes.date_applied = todayISO();
+    if (!app.follow_up_on) changes.follow_up_on = addDays(changes.date_applied, FOLLOW_UP_DAYS);
+  }
+  if (await updateApplication(app.id, changes)) showToast(`${app.company} moved to ${status}`);
+}
+
+els.statusCancel.addEventListener('click', () => els.statusDialog.close());
+// Tapping the dark area around the sheet closes it.
+els.statusDialog.addEventListener('click', (e) => {
+  if (e.target === els.statusDialog) els.statusDialog.close();
+});
+
+// ---------- Toast messages ----------
+
+let toastTimer = null;
+function showToast(text, actionLabel, onAction) {
+  els.toastText.textContent = text;
+  els.toastAction.hidden = !actionLabel;
+  els.toastAction.textContent = actionLabel || '';
+  els.toastAction.onclick = actionLabel ? () => { hideToast(); onAction(); } : null;
+  els.toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 5000);
+}
+function hideToast() {
+  els.toast.hidden = true;
+}
+
+// ---------- First-time tip ----------
+// Remembered in this browser only (localStorage), so it's just a convenience.
+
+function tipDismissed() {
+  try { return localStorage.getItem('swipeTipDismissed') === '1'; } catch { return false; }
+}
+function dismissTip() {
+  els.tip.hidden = true;
+  try { localStorage.setItem('swipeTipDismissed', '1'); } catch { /* private mode: fine */ }
+}
+function showTipIfNeeded(hasCards) {
+  els.tip.hidden = !hasCards || tipDismissed();
+}
+els.tipClose.addEventListener('click', dismissTip);
 
 // ---------- Add / edit form ----------
 
@@ -321,6 +552,8 @@ function openForm(app = null) {
     followUpTouched = Boolean(app.follow_up_on) &&
       !(app.date_applied && app.follow_up_on === addDays(app.date_applied, FOLLOW_UP_DAYS));
     els.deleteBtn.hidden = false;
+    els.archiveBtn.hidden = false;
+    els.archiveBtn.textContent = app.archived ? 'Unarchive' : 'Archive';
   } else {
     els.formTitle.textContent = 'Add application';
     const today = todayISO();
@@ -329,6 +562,7 @@ function openForm(app = null) {
     $('st-Applied').checked = true;
     followUpTouched = false;
     els.deleteBtn.hidden = true;
+    els.archiveBtn.hidden = true;
   }
 
   els.dialog.showModal();
@@ -416,17 +650,17 @@ els.form.addEventListener('submit', async (e) => {
 els.deleteBtn.addEventListener('click', async () => {
   const app = applications.find((a) => a.id === editingId);
   if (!app) return;
-  const ok = window.confirm(`Delete “${app.role}” at ${app.company}? This can’t be undone.`);
-  if (!ok) return;
-
   els.deleteBtn.disabled = true;
-  const { error } = await db.from('applications').delete().eq('id', app.id);
+  const deleted = await deleteApplication(app);
   els.deleteBtn.disabled = false;
-  if (error) { setMsg(els.formMsg, 'Could not delete: ' + error.message, 'error'); return; }
+  if (deleted) closeForm();
+});
 
-  applications = applications.filter((a) => a.id !== app.id);
+els.archiveBtn.addEventListener('click', async () => {
+  const app = applications.find((a) => a.id === editingId);
+  if (!app) return;
   closeForm();
-  render();
+  await toggleArchive(app);
 });
 
 // ---------- Other buttons ----------
@@ -459,6 +693,8 @@ db.auth.onAuthStateChange((_event, session) => {
     applications = [];
     filter = 'All';
     if (els.dialog.open) els.dialog.close();
+    if (els.statusDialog.open) els.statusDialog.close();
+    hideToast();
     els.list.replaceChildren();
     showView('login');
   }
