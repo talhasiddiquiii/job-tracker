@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FAF8F4">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <!-- Content Security Policy: the browser will only run scripts and talk to
+       servers listed here, which limits the damage if anything malicious
+       ever got into the page. -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' https://cdn.jsdelivr.net;
+    style-src 'self' https://fonts.googleapis.com;
+    font-src https://fonts.gstatic.com;
+    connect-src https://lxgylduzucvrnyxrqsey.supabase.co wss://lxgylduzucvrnyxrqsey.supabase.co;
+    img-src 'self' data:;
+    base-uri 'self';
+    form-action 'self';
+    object-src 'none'">
+  <title>Job Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Shown while we check whether you're already logged in -->
+  <div id="loading" class="loading" aria-live="polite">Loading…</div>
+
+  <!-- ===== Login screen ===== -->
+  <main id="login-view" class="login" hidden>
+    <div class="login-card">
+      <h1>Job Tracker</h1>
+      <p class="muted">Sign in with your email. We'll send you a one-time login link — no password needed.</p>
+      <form id="login-form" novalidate>
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" autocomplete="email" inputmode="email" required placeholder="you@example.com">
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn">Send login link</button>
+      </form>
+      <p id="login-msg" class="form-msg" role="status" aria-live="polite"></p>
+    </div>
+  </main>
+
+  <!-- ===== Main app (only shown when logged in) ===== -->
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <h1>Job Tracker</h1>
+      <button id="logout-btn" class="btn btn-ghost btn-small" type="button">Log out</button>
+    </header>
+
+    <main class="container">
+      <section class="summary" aria-label="Summary">
+        <div class="stat"><span class="stat-num" id="s-applied">0</span><span class="stat-label">Applied</span></div>
+        <div class="stat"><span class="stat-num" id="s-interviews">0</span><span class="stat-label">Interviews</span></div>
+        <div class="stat"><span class="stat-num" id="s-offers">0</span><span class="stat-label">Offers</span></div>
+        <div class="stat"><span class="stat-num" id="s-rate">0%</span><span class="stat-label">Interview rate</span></div>
+        <button class="stat stat-followup" id="s-followup-box" type="button" aria-describedby="s-followup-label">
+          <span class="stat-num" id="s-followups">0</span>
+          <span class="stat-label" id="s-followup-label">Follow-ups due</span>
+        </button>
+      </section>
+
+      <nav class="filters" aria-label="Filter by status" id="filters"></nav>
+
+      <p id="list-msg" class="list-msg" role="status" aria-live="polite"></p>
+      <ul id="list" class="cards"></ul>
+    </main>
+
+    <button id="add-btn" class="fab" type="button" aria-label="Add application">
+      <span aria-hidden="true">+</span> Add
+    </button>
+  </div>
+
+  <!-- ===== Add / edit form ===== -->
+  <dialog id="form-dialog" aria-labelledby="form-title">
+    <form id="app-form" method="dialog" novalidate>
+      <header class="dialog-head">
+        <h2 id="form-title">Add application</h2>
+        <button type="button" class="btn btn-ghost btn-small" id="cancel-btn">Cancel</button>
+      </header>
+
+      <div class="dialog-body">
+        <div class="field">
+          <label for="f-company">Company <span class="req">*</span></label>
+          <input id="f-company" name="company" required maxlength="200" autocomplete="organization">
+        </div>
+        <div class="field">
+          <label for="f-role">Role <span class="req">*</span></label>
+          <input id="f-role" name="role" required maxlength="200" autocomplete="off">
+        </div>
+
+        <fieldset class="field">
+          <legend>Status</legend>
+          <div class="status-picker" id="status-picker"></div>
+        </fieldset>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="f-date-applied">Date applied</label>
+            <input id="f-date-applied" name="date_applied" type="date">
+          </div>
+          <div class="field">
+            <label for="f-follow-up">Follow up on</label>
+            <input id="f-follow-up" name="follow_up_on" type="date">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="f-role-type">Role type</label>
+          <select id="f-role-type" name="role_type"></select>
+        </div>
+        <div class="field">
+          <label for="f-source">Source</label>
+          <select id="f-source" name="source"></select>
+        </div>
+        <div class="field">
+          <label for="f-cover">Cover letter</label>
+          <select id="f-cover" name="cover_letter"></select>
+        </div>
+        <div class="field">
+          <label for="f-contact">Contact</label>
+          <input id="f-contact" name="contact" maxlength="300" placeholder="Name, email or phone" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="f-link">Job link</label>
+          <input id="f-link" name="job_link" type="url" inputmode="url" maxlength="2000" placeholder="https://…">
+        </div>
+        <div class="field">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes" name="notes" rows="4" maxlength="5000"></textarea>
+        </div>
+
+        <p id="form-msg" class="form-msg" role="alert"></p>
+      </div>
+
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-danger" id="delete-btn" hidden>Delete</button>
+        <button type="submit" class="btn btn-primary" id="save-btn">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Supabase JS library, pinned to an exact version. The "integrity" hash
+       means the browser refuses to run it if the CDN ever serves a different file. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
+          integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK"
+          crossorigin="anonymous"></script>
+  <script src="app.js"></script>
+</body>
+</html>
